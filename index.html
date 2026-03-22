@@ -32,6 +32,26 @@
           </div>
 
           <label>
+            Pollinations endpoint
+            <input
+              id="endpointInput"
+              type="url"
+              value="https://gen.pollinations.ai/v1/chat/completions"
+              placeholder="https://gen.pollinations.ai/v1/chat/completions"
+            />
+          </label>
+
+          <label>
+            Publishable API key (optional but recommended)
+            <input
+              id="apiKeyInput"
+              type="password"
+              placeholder="pk_..."
+              autocomplete="off"
+            />
+          </label>
+
+          <label>
             Pollinations model
             <select id="modelSelect">
               <option value="openai">openai</option>
@@ -156,6 +176,5 @@
 
     <script type="module" src="app.js"></script>
   </body>
-                  </html>
-
-            
+                </html>
+                    
