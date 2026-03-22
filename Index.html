@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pollinations AI Code Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar panel">
+        <div>
+          <p class="eyebrow">Build with Pollinations AI</p>
+          <h1>Code Studio Agent</h1>
+          <p class="lede">
+            Edit code, ask for reviews, generate changes, and apply AI suggestions directly into the editor.
+          </p>
+        </div>
+
+        <section class="panel card controls-card">
+          <h2>Agent Controls</h2>
+          <label>
+            Model
+            <select id="modelSelect">
+              <option value="openai">openai</option>
+              <option value="mistral">mistral</option>
+            </select>
+          </label>
+
+          <label>
+            Goal for the agent
+            <textarea
+              id="goalInput"
+              rows="6"
+              placeholder="Example: Refactor this component, improve readability, and return the full updated file in a fenced code block."
+            ></textarea>
+          </label>
+
+          <div class="action-grid">
+            <button class="secondary" data-prompt="review">Review</button>
+            <button class="secondary" data-prompt="fix">Fix Bugs</button>
+            <button class="secondary" data-prompt="explain">Explain</button>
+            <button class="secondary" data-prompt="tests">Suggest Tests</button>
+          </div>
+
+          <button id="runAgentButton" class="primary">Run Pollinations Agent</button>
+          <p class="status" id="statusText">Ready.</p>
+        </section>
+
+        <section class="panel card tips-card">
+          <h2>How it works</h2>
+          <ul>
+            <li>The editor content is sent to Pollinations AI with your goal.</li>
+            <li>The agent replies with analysis and, when useful, a full replacement file.</li>
+            <li>Use <strong>Apply latest code block</strong> to replace the current editor content.</li>
+          </ul>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <section class="panel editor-panel">
+          <div class="toolbar">
+            <div>
+              <p class="eyebrow">Editor</p>
+              <h2>main.js</h2>
+            </div>
+            <div class="toolbar-actions">
+              <button id="copyCodeButton" class="ghost">Copy Code</button>
+              <button id="applyCodeButton" class="ghost">Apply latest code block</button>
+            </div>
+          </div>
+
+          <div class="editor-shell">
+            <pre id="lineNumbers" aria-hidden="true">1</pre>
+            <textarea id="codeEditor" spellcheck="false"></textarea>
+          </div>
+        </section>
+
+        <section class="panel output-panel">
+          <div class="toolbar">
+            <div>
+              <p class="eyebrow">Agent Output</p>
+              <h2>Conversation</h2>
+            </div>
+            <button id="clearChatButton" class="ghost">Clear</button>
+          </div>
+
+          <div id="messages" class="messages"></div>
+        </section>
+      </main>
+    </div>
+
+    <template id="messageTemplate">
+      <article class="message">
+        <div class="message-meta"></div>
+        <div class="message-body"></div>
+      </article>
+    </template>
+
+    <script src="app.js" type="module"></script>
+  </body>
+            </html>
+            
