@@ -1,4 +1,6 @@
-const POLLINATIONS_ENDPOINT = "https://text.pollinations.ai/openai";
+const DEFAULT_ENDPOINT = "https://gen.pollinations.ai/v1/chat/completions";
+const LEGACY_ENDPOINT = "https://text.pollinations.ai/openai";
+const STORAGE_KEY = "pollinations-executable-editor-settings";
 
 const STARTER_FILES = {
   html: `<!doctype html>
@@ -86,6 +88,8 @@ const previewFrame = document.querySelector("#previewFrame");
 const messages = document.querySelector("#messages");
 const statusText = document.querySelector("#statusText");
 const goalInput = document.querySelector("#goalInput");
+const endpointInput = document.querySelector("#endpointInput");
+const apiKeyInput = document.querySelector("#apiKeyInput");
 const modelSelect = document.querySelector("#modelSelect");
 const modeSelect = document.querySelector("#modeSelect");
 const runAgentButton = document.querySelector("#runAgentButton");
@@ -110,6 +114,72 @@ const conversation = [];
 const projectFiles = { ...STARTER_FILES };
 let activeFile = "html";
 let latestAssistantPayload = null;
+
+function loadSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveSettings() {
+  const payload = {
+    endpoint: endpointInput.value.trim(),
+    apiKey: apiKeyInput.value.trim(),
+    model: modelSelect.value
+  };
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+}
+
+function hydrateSettings() {
+  const saved = loadSettings();
+  endpointInput.value = saved.endpoint || DEFAULT_ENDPOINT;
+  apiKeyInput.value = saved.apiKey || "";
+  if (saved.model) {
+    modelSelect.value = saved.model;
+  }
+}
+
+function getConfiguredEndpoints() {
+  const configured = endpointInput.value.trim() || DEFAULT_ENDPOINT;
+  const endpoints = [configured];
+
+  if (configured !== LEGACY_ENDPOINT) {
+    endpoints.push(LEGACY_ENDPOINT);
+  }
+
+  return endpoints;
+}
+
+function buildHeaders(endpoint, apiKey) {
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json"
+  };
+
+  if (apiKey && endpoint.includes("gen.pollinations.ai")) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  return headers;
+}
+
+async function postChatCompletion(endpoint, body, apiKey) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: buildHeaders(endpoint, apiKey),
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(`${endpoint} responded with ${response.status}: ${details || "No response body."}`);
+  }
+
+  return response.json();
+}
 
 function getPreviewDocument(files = projectFiles) {
   const parser = new DOMParser();
@@ -148,6 +218,7 @@ function switchFile(fileKey, shouldSync = true) {
   if (shouldSync) {
     syncEditorToState();
   }
+
   activeFile = fileKey;
   activeFileLabel.textContent = fileLabels[fileKey];
   editor.value = projectFiles[fileKey];
@@ -301,8 +372,20 @@ function applyAssistantPayload(payload) {
   setStatus("Applied the latest AI-generated files.");
 }
 
+function formatFetchFailure(errorMessages) {
+  return [
+    "The Pollinations request could not be completed.",
+    ...errorMessages.map((message, index) => `${index + 1}. ${message}`),
+    "Tips:",
+    "- Check the endpoint URL.",
+    "- If you are using gen.pollinations.ai, add a publishable API key.",
+    "- If the browser still says 'Failed to fetch', it is usually a network, CORS, or provider-side issue."
+  ].join("\n");
+}
+
 async function callPollinationsAgent(goal) {
   syncEditorToState();
+  saveSettings();
 
   const instruction = buildInstruction(goal);
   const systemPrompt = [
@@ -314,39 +397,51 @@ async function callPollinationsAgent(goal) {
     "For explain-only requests, you may omit changes, but still keep the explanation concise and useful."
   ].join(" ");
 
-  const userPrompt = [
-    `Mode: ${modeSelect.value}`,
-    `Goal: ${instruction}`,
-    "Current project files:",
-    "```json",
-    JSON.stringify(projectSnapshot(), null, 2),
-    "```"
-  ].join("\n");
+  const requestBody = {
+    model: modelSelect.value,
+    private: true,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...conversation,
+      {
+        role: "user",
+        content: [
+          `Mode: ${modeSelect.value}`,
+          `Goal: ${instruction}`,
+          "Current project files:",
+          "```json",
+          JSON.stringify(projectSnapshot(), null, 2),
+          "```"
+        ].join("\n")
+      }
+    ]
+  };
 
   appendMessage("user", `${modeSelect.options[modeSelect.selectedIndex].text}: ${goal}`);
-  conversation.push({ role: "user", content: userPrompt });
+  conversation.push(requestBody.messages.at(-1));
   setBusy(true);
   setStatus("Calling Pollinations AI agent...");
 
-  try {
-    const response = await fetch(POLLINATIONS_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: modelSelect.value,
-        private: true,
-        messages: [{ role: "system", content: systemPrompt }, ...conversation]
-      })
-    });
+  const apiKey = apiKeyInput.value.trim();
+  const endpoints = getConfiguredEndpoints();
+  const attemptErrors = [];
 
-    if (!response.ok) {
-      const details = await response.text();
-      throw new Error(`Pollinations request failed (${response.status}): ${details}`);
+  try {
+    let payload;
+
+    for (const endpoint of endpoints) {
+      try {
+        payload = await postChatCompletion(endpoint, requestBody, apiKey);
+        break;
+      } catch (error) {
+        attemptErrors.push(error.message);
+      }
     }
 
-    const payload = await response.json();
+    if (!payload) {
+      throw new Error(formatFetchFailure(attemptErrors));
+    }
+
     const reply = payload?.choices?.[0]?.message?.content?.trim();
 
     if (!reply) {
@@ -365,7 +460,7 @@ async function callPollinationsAgent(goal) {
     );
   } catch (error) {
     appendMessage("assistant", `Request failed.\n\n${error.message}`);
-    setStatus(error.message, "error");
+    setStatus("Pollinations request failed. Check the endpoint and API key fields.", "error");
   } finally {
     setBusy(false);
   }
@@ -390,6 +485,12 @@ editor.addEventListener("scroll", syncScroll);
 fileTabs.forEach((tab) => {
   tab.addEventListener("click", () => switchFile(tab.dataset.file));
 });
+
+[endpointInput, apiKeyInput].forEach((input) => {
+  input.addEventListener("change", saveSettings);
+  input.addEventListener("blur", saveSettings);
+});
+modelSelect.addEventListener("change", saveSettings);
 
 runAgentButton.addEventListener("click", () => {
   const goal = goalInput.value.trim();
@@ -456,9 +557,11 @@ promptTemplateButtons.forEach((button) => {
   });
 });
 
+hydrateSettings();
 switchFile("html");
 appendMessage(
   "assistant",
-  "Describe an app to build, like `make a snake game`, then apply the AI files and run the preview."
+  "Describe an app to build, like `make a snake game`, then apply the AI files and run the preview. If the request fails, try adding a publishable Pollinations key or switching endpoints."
 );
 runPreview();
+      
