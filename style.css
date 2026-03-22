@@ -34,7 +34,8 @@ body {
 
 button,
 textarea,
-select {
+select,
+input {
   font: inherit;
 }
 
@@ -166,6 +167,7 @@ label {
 
 select,
 textarea,
+input,
 iframe {
   width: 100%;
   border: 1px solid rgba(148, 163, 184, 0.18);
@@ -173,12 +175,14 @@ iframe {
 }
 
 select,
-textarea {
+textarea,
+input {
   background: rgba(8, 15, 28, 0.95);
   color: var(--text);
 }
 
-select {
+select,
+input {
   padding: 0.85rem 1rem;
 }
 
@@ -382,5 +386,5 @@ ul {
   .stacked-actions button {
     width: 100%;
   }
-  }
+                         }
   
