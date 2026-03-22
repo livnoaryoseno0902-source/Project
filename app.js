@@ -1,44 +1,169 @@
 const POLLINATIONS_ENDPOINT = "https://text.pollinations.ai/openai";
-const DEFAULT_CODE = "function greet(name) {\n  return `Hello, ${name}!`;\n}\n\nconsole.log(greet(\"Pollinations AI\"));\n";
+
+const STARTER_FILES = {
+  html: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neon Counter</title>
+  </head>
+  <body>
+    <main class="app">
+      <h1>Neon Counter</h1>
+      <p>Live-edit this app or ask the AI to replace it.</p>
+      <button id="incrementButton">Count: <span id="countValue">0</span></button>
+    </main>
+  </body>
+</html>
+`,
+  css: `body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  font-family: Inter, system-ui, sans-serif;
+  background: radial-gradient(circle at top, #1f3b73, #08101f 55%);
+  color: #f2f7ff;
+}
+
+.app {
+  text-align: center;
+  padding: 2rem;
+  border-radius: 24px;
+  background: rgba(8, 16, 31, 0.76);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+
+button {
+  margin-top: 1rem;
+  padding: 0.9rem 1.3rem;
+  border: 0;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+`,
+  js: `const countValue = document.getElementById("countValue");
+const incrementButton = document.getElementById("incrementButton");
+
+let count = 0;
+
+incrementButton.addEventListener("click", () => {
+  count += 1;
+  countValue.textContent = count;
+});
+`
+};
+
+const PROMPT_TEMPLATES = {
+  snake: {
+    mode: "build",
+    prompt:
+      "Build a complete snake game with score tracking, keyboard controls, restart support, collision detection, responsive layout, and polished arcade styling."
+  },
+  landing: {
+    mode: "build",
+    prompt:
+      "Build a modern landing page with a hero section, feature cards, pricing section, call-to-action buttons, and smooth reveal animations using only HTML, CSS, and JavaScript."
+  },
+  todo: {
+    mode: "build",
+    prompt:
+      "Build a polished todo app with add, complete, delete, filter, and localStorage persistence. Keep the UI responsive and visually appealing."
+  },
+  debug: {
+    mode: "fix",
+    prompt:
+      "Inspect the current project, identify likely bugs or broken behavior, fix them, and return the full updated files."
+  }
+};
 
 const editor = document.querySelector("#codeEditor");
 const lineNumbers = document.querySelector("#lineNumbers");
+const previewFrame = document.querySelector("#previewFrame");
 const messages = document.querySelector("#messages");
 const statusText = document.querySelector("#statusText");
 const goalInput = document.querySelector("#goalInput");
 const modelSelect = document.querySelector("#modelSelect");
+const modeSelect = document.querySelector("#modeSelect");
 const runAgentButton = document.querySelector("#runAgentButton");
-const copyCodeButton = document.querySelector("#copyCodeButton");
-const applyCodeButton = document.querySelector("#applyCodeButton");
+const applyChangesButton = document.querySelector("#applyChangesButton");
+const copyFileButton = document.querySelector("#copyFileButton");
+const resetExampleButton = document.querySelector("#resetExampleButton");
+const runPreviewButton = document.querySelector("#runPreviewButton");
+const openPreviewButton = document.querySelector("#openPreviewButton");
 const clearChatButton = document.querySelector("#clearChatButton");
+const activeFileLabel = document.querySelector("#activeFileLabel");
+const fileTabs = [...document.querySelectorAll(".tab")];
+const promptTemplateButtons = [...document.querySelectorAll("[data-template]")];
 const messageTemplate = document.querySelector("#messageTemplate");
 
-const cannedPrompts = {
-  review:
-    "Review the code like a senior engineer. List strengths, bugs, and improvements. If a rewrite is needed, provide the full updated file in a fenced code block.",
-  fix:
-    "Find likely bugs or risky edge cases. Return a corrected full file in a fenced code block and explain the changes.",
-  explain:
-    "Explain what the current code does, its architecture, and the key tradeoffs in concise bullets.",
-  tests:
-    "Suggest practical test cases for this code, including edge cases and expected outcomes."
+const fileLabels = {
+  html: "index.html",
+  css: "styles.css",
+  js: "script.js"
 };
 
 const conversation = [];
-let latestCodeBlock = "";
+const projectFiles = { ...STARTER_FILES };
+let activeFile = "html";
+let latestAssistantPayload = null;
+
+function getPreviewDocument(files = projectFiles) {
+  const parser = new DOMParser();
+  const documentNode = parser.parseFromString(files.html, "text/html");
+  const styleTag = documentNode.createElement("style");
+  const scriptTag = documentNode.createElement("script");
+
+  styleTag.textContent = files.css;
+  scriptTag.textContent = files.js;
+
+  documentNode.head.append(styleTag);
+  documentNode.body.append(scriptTag);
+
+  return "<!doctype html>\n" + documentNode.documentElement.outerHTML;
+}
+
+function setStatus(message, type = "info") {
+  statusText.textContent = message;
+  statusText.style.color = type === "error" ? "#ff9c9c" : "#9eb2d1";
+}
 
 function updateLineNumbers() {
   const lineCount = editor.value.split("\n").length;
   lineNumbers.textContent = Array.from({ length: lineCount }, (_, index) => index + 1).join("\n");
 }
 
+function syncEditorToState() {
+  projectFiles[activeFile] = editor.value;
+}
+
 function syncScroll() {
   lineNumbers.scrollTop = editor.scrollTop;
 }
 
-function setStatus(message, isError = false) {
-  statusText.textContent = message;
-  statusText.style.color = isError ? "#ff9b9b" : "#93a4c3";
+function switchFile(fileKey, shouldSync = true) {
+  if (shouldSync) {
+    syncEditorToState();
+  }
+  activeFile = fileKey;
+  activeFileLabel.textContent = fileLabels[fileKey];
+  editor.value = projectFiles[fileKey];
+  updateLineNumbers();
+
+  fileTabs.forEach((tab) => {
+    const isActive = tab.dataset.file === fileKey;
+    tab.classList.toggle("active", isActive);
+    tab.setAttribute("aria-selected", String(isActive));
+  });
+}
+
+function runPreview() {
+  syncEditorToState();
+  previewFrame.srcdoc = getPreviewDocument();
+  setStatus("Preview updated.");
 }
 
 function escapeHtml(value) {
@@ -65,62 +190,140 @@ function formatMessageBody(text) {
     .join("");
 }
 
-function extractCodeBlock(text) {
-  const match = text.match(/```(?:\w+)?\n([\s\S]*?)```/);
-  return match ? match[1].trim() : "";
-}
-
 function appendMessage(role, body) {
   const fragment = messageTemplate.content.cloneNode(true);
-  const messageNode = fragment.querySelector(".message");
-  const metaNode = fragment.querySelector(".message-meta");
-  const bodyNode = fragment.querySelector(".message-body");
-
-  messageNode.dataset.role = role;
-  metaNode.textContent = role === "user" ? "You" : "Pollinations Agent";
-  bodyNode.innerHTML = formatMessageBody(body);
+  fragment.querySelector(".message-meta").textContent = role === "user" ? "You" : "Pollinations Agent";
+  fragment.querySelector(".message-body").innerHTML = formatMessageBody(body);
   messages.appendChild(fragment);
   messages.scrollTop = messages.scrollHeight;
-
-  const codeBlock = extractCodeBlock(body);
-  if (codeBlock) {
-    latestCodeBlock = codeBlock;
-    applyCodeButton.disabled = false;
-  }
 }
 
 function setBusy(isBusy) {
   runAgentButton.disabled = isBusy;
-  [...document.querySelectorAll("[data-prompt]")].forEach((button) => {
+  promptTemplateButtons.forEach((button) => {
     button.disabled = isBusy;
   });
 }
 
-async function callPollinationsAgent(instruction) {
-  const code = editor.value.trim();
+function projectSnapshot() {
+  return {
+    "index.html": projectFiles.html,
+    "styles.css": projectFiles.css,
+    "script.js": projectFiles.js
+  };
+}
 
-  if (!code) {
-    setStatus("Add some code before running the agent.", true);
-    return;
+function buildInstruction(goal) {
+  const modes = {
+    build: "Create a complete new app based on the request.",
+    edit: "Modify the current app to satisfy the request while preserving working parts.",
+    fix: "Audit the current app, identify bugs, and return corrected files.",
+    explain: "Explain how the current app works. Only change files if a fix is absolutely necessary."
+  };
+
+  return [modes[modeSelect.value], goal].join(" ");
+}
+
+function extractJsonBlock(text) {
+  const fencedJsonMatch = text.match(/```json\n([\s\S]*?)```/i);
+  if (fencedJsonMatch) {
+    return fencedJsonMatch[1].trim();
   }
 
+  const genericMatch = text.match(/\{[\s\S]*"files"[\s\S]*\}/);
+  return genericMatch ? genericMatch[0].trim() : "";
+}
+
+function extractCodeBlocksByLanguage(text) {
+  const matches = [...text.matchAll(/```(html|css|javascript|js)\n([\s\S]*?)```/gi)];
+  if (!matches.length) {
+    return null;
+  }
+
+  const files = {};
+  for (const match of matches) {
+    const language = match[1].toLowerCase();
+    const content = match[2].trim();
+
+    if (language === "html") {
+      files.html = content;
+    } else if (language === "css") {
+      files.css = content;
+    } else {
+      files.js = content;
+    }
+  }
+
+  return Object.keys(files).length ? files : null;
+}
+
+function normalizeAssistantPayload(text) {
+  const jsonBlock = extractJsonBlock(text);
+
+  if (jsonBlock) {
+    try {
+      const parsed = JSON.parse(jsonBlock);
+      const files = parsed.files ?? parsed;
+      return {
+        summary: parsed.summary ?? "AI response parsed successfully.",
+        files: {
+          html: files["index.html"] ?? files.html ?? projectFiles.html,
+          css: files["styles.css"] ?? files.css ?? projectFiles.css,
+          js: files["script.js"] ?? files.js ?? projectFiles.js
+        }
+      };
+    } catch (error) {
+      console.warn("Failed to parse JSON payload", error);
+    }
+  }
+
+  const languageFiles = extractCodeBlocksByLanguage(text);
+  if (languageFiles) {
+    return {
+      summary: "AI returned code blocks.",
+      files: {
+        html: languageFiles.html ?? projectFiles.html,
+        css: languageFiles.css ?? projectFiles.css,
+        js: languageFiles.js ?? projectFiles.js
+      }
+    };
+  }
+
+  return null;
+}
+
+function applyAssistantPayload(payload) {
+  projectFiles.html = payload.files.html;
+  projectFiles.css = payload.files.css;
+  projectFiles.js = payload.files.js;
+  switchFile(activeFile, false);
+  runPreview();
+  setStatus("Applied the latest AI-generated files.");
+}
+
+async function callPollinationsAgent(goal) {
+  syncEditorToState();
+
+  const instruction = buildInstruction(goal);
   const systemPrompt = [
-    "You are an expert software engineering agent inside a browser code editor.",
-    "Analyze the user's code carefully.",
-    "If you provide revised code, return the complete file inside one fenced code block.",
-    "Keep explanations actionable and concise."
+    "You are an expert front-end coding agent working inside a live browser IDE.",
+    "Always reason about a 3-file project made of index.html, styles.css, and script.js.",
+    "When asked to build, edit, or fix code, return a JSON object inside one fenced json block.",
+    'Use this shape: {"summary":"short summary","files":{"index.html":"...","styles.css":"...","script.js":"..."}}.',
+    "Return complete file contents for every file when code changes are needed.",
+    "For explain-only requests, you may omit changes, but still keep the explanation concise and useful."
   ].join(" ");
 
   const userPrompt = [
+    `Mode: ${modeSelect.value}`,
     `Goal: ${instruction}`,
-    "Current file name: main.js",
-    "Current code:",
-    "```javascript",
-    code,
+    "Current project files:",
+    "```json",
+    JSON.stringify(projectSnapshot(), null, 2),
     "```"
   ].join("\n");
 
-  appendMessage("user", instruction);
+  appendMessage("user", `${modeSelect.options[modeSelect.selectedIndex].text}: ${goal}`);
   conversation.push({ role: "user", content: userPrompt });
   setBusy(true);
   setStatus("Calling Pollinations AI agent...");
@@ -134,10 +337,7 @@ async function callPollinationsAgent(instruction) {
       body: JSON.stringify({
         model: modelSelect.value,
         private: true,
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...conversation
-        ]
+        messages: [{ role: "system", content: systemPrompt }, ...conversation]
       })
     });
 
@@ -155,72 +355,110 @@ async function callPollinationsAgent(instruction) {
 
     conversation.push({ role: "assistant", content: reply });
     appendMessage("assistant", reply);
-    setStatus("Agent response received.");
+
+    latestAssistantPayload = normalizeAssistantPayload(reply);
+    applyChangesButton.disabled = !latestAssistantPayload;
+    setStatus(
+      latestAssistantPayload
+        ? "AI response received. Apply the generated files to update the editor and preview."
+        : "AI response received. No structured file update was detected."
+    );
   } catch (error) {
     appendMessage("assistant", `Request failed.\n\n${error.message}`);
-    setStatus(error.message, true);
+    setStatus(error.message, "error");
   } finally {
     setBusy(false);
   }
 }
 
-function handlePromptShortcut(type) {
-  const instruction = cannedPrompts[type];
-  goalInput.value = instruction;
-  callPollinationsAgent(instruction);
+function loadStarterProject() {
+  projectFiles.html = STARTER_FILES.html;
+  projectFiles.css = STARTER_FILES.css;
+  projectFiles.js = STARTER_FILES.js;
+  switchFile(activeFile, false);
+  runPreview();
+  setStatus("Loaded the starter example project.");
 }
 
-editor.value = DEFAULT_CODE;
-updateLineNumbers();
-applyCodeButton.disabled = true;
-appendMessage(
-  "assistant",
-  "Ask the agent to review, explain, or rewrite the code. When the response includes a fenced code block, you can apply it directly to the editor."
-);
-
-editor.addEventListener("input", updateLineNumbers);
+editor.addEventListener("input", () => {
+  syncEditorToState();
+  updateLineNumbers();
+  runPreview();
+});
 editor.addEventListener("scroll", syncScroll);
 
+fileTabs.forEach((tab) => {
+  tab.addEventListener("click", () => switchFile(tab.dataset.file));
+});
+
 runAgentButton.addEventListener("click", () => {
-  const instruction = goalInput.value.trim();
-  if (!instruction) {
-    setStatus("Add an agent goal first.", true);
+  const goal = goalInput.value.trim();
+  if (!goal) {
+    setStatus("Describe what the AI should build or fix first.", "error");
     return;
   }
 
-  callPollinationsAgent(instruction);
+  callPollinationsAgent(goal);
 });
 
-document.querySelectorAll("[data-prompt]").forEach((button) => {
-  button.addEventListener("click", () => handlePromptShortcut(button.dataset.prompt));
+applyChangesButton.addEventListener("click", () => {
+  if (!latestAssistantPayload) {
+    setStatus("No AI-generated files are ready to apply.", "error");
+    return;
+  }
+
+  applyAssistantPayload(latestAssistantPayload);
 });
 
-copyCodeButton.addEventListener("click", async () => {
+copyFileButton.addEventListener("click", async () => {
   try {
     await navigator.clipboard.writeText(editor.value);
-    setStatus("Code copied to clipboard.");
+    setStatus(`Copied ${fileLabels[activeFile]} to the clipboard.`);
   } catch (error) {
-    setStatus(`Clipboard unavailable: ${error.message}`, true);
+    setStatus(`Clipboard unavailable: ${error.message}`, "error");
   }
 });
 
-applyCodeButton.addEventListener("click", () => {
-  if (!latestCodeBlock) {
-    setStatus("No code block available to apply.", true);
+runPreviewButton.addEventListener("click", runPreview);
+
+openPreviewButton.addEventListener("click", () => {
+  syncEditorToState();
+  const previewWindow = window.open();
+  if (!previewWindow) {
+    setStatus("Popup blocked. Allow popups to open the preview in a new tab.", "error");
     return;
   }
 
-  editor.value = latestCodeBlock;
-  updateLineNumbers();
-  setStatus("Latest AI code block applied to the editor.");
+  previewWindow.document.write(getPreviewDocument());
+  previewWindow.document.close();
 });
+
+resetExampleButton.addEventListener("click", loadStarterProject);
 
 clearChatButton.addEventListener("click", () => {
   messages.innerHTML = "";
   conversation.length = 0;
-  latestCodeBlock = "";
-  applyCodeButton.disabled = true;
-  appendMessage("assistant", "Conversation cleared. The editor content is unchanged.");
+  latestAssistantPayload = null;
+  applyChangesButton.disabled = true;
+  appendMessage(
+    "assistant",
+    "Conversation cleared. Your current project files remain in the editor and preview."
+  );
   setStatus("Conversation cleared.");
 });
-      
+
+promptTemplateButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    const template = PROMPT_TEMPLATES[button.dataset.template];
+    modeSelect.value = template.mode;
+    goalInput.value = template.prompt;
+    callPollinationsAgent(template.prompt);
+  });
+});
+
+switchFile("html");
+appendMessage(
+  "assistant",
+  "Describe an app to build, like `make a snake game`, then apply the AI files and run the preview."
+);
+runPreview();
